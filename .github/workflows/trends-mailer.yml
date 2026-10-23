@@ -1,0 +1,65 @@
+name: 每日热点速览（X + YouTube）
+
+on:
+  schedule:
+    # 每天 UTC 00:00 = 北京时间 08:00
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "X 地区（如 united-states / japan / worldwide）"
+        required: false
+        default: "united-states"
+      yt_source:
+        description: "YouTube 来源：trending（全站热门）或 charts（音乐榜）"
+        required: false
+        default: "trending"
+      send_mail:
+        description: "是否发送邮件（false 则只生成报告）"
+        required: false
+        default: "true"
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        working-directory: trends-mailer
+        run: pip install -r requirements.txt
+
+      - name: 抓取热点
+        working-directory: trends-mailer
+        env:
+          REGION: ${{ github.event.inputs.region || 'united-states' }}
+          YT_SOURCE: ${{ github.event.inputs.yt_source || 'trending' }}
+        run: |
+          python fetch_trends.py --region "$REGION" --yt-source "$YT_SOURCE" --limit 30
+
+      - name: 发送邮件
+        if: ${{ github.event.inputs.send_mail != 'false' }}
+        working-directory: trends-mailer
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: |
+          DATE=$(TZ=Asia/Shanghai date +%F)
+          python send_mail.py --html "reports/${DATE}.html" --md "reports/${DATE}.md"
+
+      - name: 归档报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trends-${{ github.run_id }}
+          path: trends-mailer/reports/
+          retention-days: 30
