@@ -42,6 +42,24 @@ RSSHUB_INSTANCES = [
     "https://rss.shab.fun",
 ]
 
+# YouTube 全站热门：/feed/trending 已被官方下架（会重定向到首页），
+# 改用 Piped / Invidious 镜像的 trending API 兜底
+PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi.adminforge.de",
+    "https://api.piped.private.coffee",
+    "https://pipedapi.leptons.xyz",
+    "https://pipedapi.reallyaweso.me",
+]
+INVIDIOUS_INSTANCES = [
+    "https://invidious.f5.si",
+    "https://inv.nadeko.net",
+    "https://yewtu.be",
+    "https://iv.melmac.space",
+    "https://invidious.jing.rocks",
+    "https://inv.tux.pizza",
+]
+
 
 @dataclass
 class Trend:
@@ -211,10 +229,89 @@ def fetch_youtube_charts(country: str, limit: int) -> tuple[list[Video], str]:
     return [], ""
 
 
+def _videos_from_piped(data: list, limit: int) -> list[Video]:
+    out: list[Video] = []
+    for v in data:
+        if len(out) >= limit:
+            break
+        url = (v.get("url") or "").strip()
+        if "v=" not in url:
+            continue
+        vid = url.split("v=")[-1].split("&")[0]
+        title = (v.get("title") or "").strip()
+        if not title or not vid:
+            continue
+        out.append(
+            Video(
+                title=title,
+                channel=(v.get("uploaderName") or "").strip(),
+                url=f"https://www.youtube.com/watch?v={vid}",
+            )
+        )
+    return out
+
+
+def fetch_youtube_mirrors(limit: int, region: str) -> tuple[list[Video], str]:
+    """Piped / Invidious 镜像的 trending API，作为 /feed/trending 下架后的兜底。"""
+    for base in PIPED_INSTANCES:
+        try:
+            r = requests.get(
+                f"{base}/trending?region={region}",
+                headers={"User-Agent": UA},
+                timeout=12,
+            )
+            if r.status_code != 200:
+                print(f"  [warn] piped {base} -> HTTP {r.status_code}", file=sys.stderr, flush=True)
+                continue
+            videos = _videos_from_piped(r.json(), limit)
+            if videos:
+                print(f"  [info] piped {base} -> {len(videos)} 条", flush=True)
+                return videos, f"{base} (piped)"
+        except Exception as e:  # noqa: BLE001
+            print(f"  [warn] piped {base} -> {type(e).__name__}", file=sys.stderr, flush=True)
+
+    for base in INVIDIOUS_INSTANCES:
+        try:
+            r = requests.get(
+                f"{base}/api/v1/trending?region={region}",
+                headers={"User-Agent": UA},
+                timeout=12,
+            )
+            if r.status_code != 200:
+                print(f"  [warn] invidious {base} -> HTTP {r.status_code}", file=sys.stderr, flush=True)
+                continue
+            videos: list[Video] = []
+            for v in r.json():
+                if len(videos) >= limit:
+                    break
+                vid = (v.get("videoId") or "").strip()
+                title = (v.get("title") or "").strip()
+                if not vid or not title:
+                    continue
+                videos.append(
+                    Video(
+                        title=title,
+                        channel=(v.get("author") or "").strip(),
+                        url=f"https://www.youtube.com/watch?v={vid}",
+                    )
+                )
+            if videos:
+                print(f"  [info] invidious {base} -> {len(videos)} 条", flush=True)
+                return videos, f"{base} (invidious)"
+        except Exception as e:  # noqa: BLE001
+            print(f"  [warn] invidious {base} -> {type(e).__name__}", file=sys.stderr, flush=True)
+
+    return [], ""
+
+
 def fetch_youtube(limit: int, source: str = "trending", country: str = "us", proxy: str = "") -> tuple[list[Video], str]:
     if source == "charts":
         return fetch_youtube_charts(country, limit)
-    return fetch_youtube_trending(limit, proxy)
+    videos, src = fetch_youtube_trending(limit, proxy)
+    if videos:
+        return videos, src
+    print("  [info] /feed/trending 不可用，改用 Piped / Invidious 镜像 ...", flush=True)
+    return fetch_youtube_mirrors(limit, country.upper() or "US")
 
 
 # ----------------------------------------------------------------------- render
@@ -225,10 +322,11 @@ def md_escape(s: str) -> str:
 
 def yt_label(rep: Report) -> str:
     """给 YouTube 区块用的人话标签：全站热门 / 某地区音乐榜"""
-    if "feed/trending" in rep.yt_source:
-        return "全站热门"
-    if rep.yt_country:
+    src = rep.yt_source or ""
+    if "rsshub" in src or "rss.shab" in src:
         return f"音乐趋势榜 · {rep.yt_country}"
+    if src:
+        return "全站热门"
     return "趋势"
 
 
