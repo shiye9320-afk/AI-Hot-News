@@ -8,12 +8,20 @@
 | 数据 | 来源 | 说明 |
 |---|---|---|
 | X 热搜 | `getdaytrends.com`（主）+ `trends24.in`（备） | 两个独立镜像交叉验证，同时出现的话题会在报告里标注 |
-| YouTube 全站热门 | `youtube.com/feed/trending`（经 yt-dlp） | 默认。游戏/科技/vlog 混排的真实首页热门 |
+| YouTube 全站热门 | **Piped 镜像** `/trending?region=US`（主） | 默认。实测 `api.piped.private.coffee` 可用，返回 15 条真实热门 |
+| ↳ 备用链路 | yt-dlp 抓 `/feed/trending` | ⚠️ **该页面已被 YouTube 官方下架**，现在会 302 到首页，仅作兼容保留 |
+| ↳ 再备用 | Invidious 镜像 `/api/v1/trending?region=US` | 生态萎缩严重，全球仅剩极少数实例 |
 | YouTube 音乐趋势 | RSSHub `/youtube/charts/TrendingVideos/:country` | 备选，`--yt-source charts` 时启用 |
 
-⚠️ **YouTube 全站热门必须能访问 youtube.com**。大陆裸网会超时，两种解法：
-- 本机挂代理后加 `--proxy http://127.0.0.1:7890`（端口换你自己的）
-- 或直接丢到 GitHub Actions 跑，runner 在境外天然可访问（推荐）
+> **关于 `/feed/trending`**：这个页面在 2025 年被 YouTube 移除，yt-dlp 会报
+> `The channel/playlist does not exist and the URL redirected to youtube.com home page`。
+> 这不是代码问题，所以脚本改成了 Piped/Invidious 镜像兜底。
+>
+> 想要**零故障的官方数据**，可以申请 YouTube Data API v3 的 key，用
+> `videos?part=snippet&chart=mostPopular&regionCode=US`（免费额度 10000 units/天，1 次调用 1 unit），
+> 这条路最稳，但需要 Google Cloud 项目。
+
+⚠️ **这些镜像在境外**。大陆裸网访问会被墙，所以推荐直接丢给 GitHub Actions 跑（runner 天然可访问）。
 
 ## 快速开始
 
